@@ -1,155 +1,147 @@
-// src/app/send/_components/Step3_DrawSign.js
+// src/app/sign/[token]/page.js
 "use client";
 
-import { useRef, useEffect, useState } from 'react';
-import Image from 'next/image'; // <<< 1. IMPORTAR o componente Image do Next.js
-import SignaturePad from 'signature_pad';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Document, Page, pdfjs } from 'react-pdf';
-import Draggable from 'react-draggable';
-import api from '@/lib/api';
+import { useState, useEffect } from 'react';
+import api from '@/lib/api'; // Sua instância configurada do Axios
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
+// Importa os componentes de cada passo do fluxo
+import Step1_Summary from './_components/Step1_Summary';
+import Step2_Identify from './_components/Step2_Identify';
+import Step3_DrawSign from './_components/Step3_DrawSign';
+import Step4_VerifyOtp from './_components/Step4_VerifyOtp';
+import Step5_Success from './_components/Step5_Success';
 
-export default function Step3_DrawSign({ token, documentUrl, onNext, onBack, onSigned }) {
-  const [subStep, setSubStep] = useState('capture');
-  const [signatureImage, setSignatureImage] = useState(null);
+// Componente para exibir um estado de carregamento
+import { Skeleton } from '@/components/ui/skeleton'; 
+// Componente para exibir um logo (opcional)
+import Image from 'next/image';
+
+/**
+ * Página principal que gerencia o fluxo de assinatura de um documento.
+ * A rota dinâmica `[token]` captura o token de acesso único do signatário.
+ */
+export default function SignPage({ params }) {
+  const { token } = params;
   
-  const canvasRef = useRef(null);
-  const [signaturePad, setSignaturePad] = useState(null);
-  const [typedName, setTypedName] = useState('');
-  const [activeTab, setActiveTab] = useState('draw');
+  // Estado para controlar qual passo do fluxo é exibido
+  // 0: Carregando, 1: Resumo, 2: Identificação, 3: Assinatura, 4: OTP, 5: Sucesso, -1: Erro
+  const [currentStep, setCurrentStep] = useState(0); 
+  const [error, setError] = useState('');
+  
+  // Estado para armazenar dados coletados durante o fluxo
+  const [summaryData, setSummaryData] = useState(null);
+  const [documentUrl, setDocumentUrl] = useState(null); // URL do PDF para renderização
+  const [signatureImage, setSignatureImage] = useState(null); // Imagem da assinatura em Base64
 
+  // Efeito executado ao carregar a página para buscar os dados iniciais do documento.
   useEffect(() => {
-    if (activeTab === 'draw' && canvasRef.current && !signaturePad) {
-      const pad = new SignaturePad(canvasRef.current, { backgroundColor: 'rgb(255, 255, 255)' });
-      setSignaturePad(pad);
+    if (!token) {
+      setError("Token de assinatura não fornecido.");
+      setCurrentStep(-1);
+      return;
     }
-  }, [activeTab, signaturePad]);
 
-  const generateTypedSignatureImage = (text) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 400; canvas.height = 100;
-    const ctx = canvas.getContext('2d');
-    // <<< 2. CORREÇÃO DA FONTE: Usar aspas simples
-    ctx.font = "40px 'Dancing Script'"; 
-    ctx.fillStyle = 'black';
-    ctx.fillText(text, 10, 60);
-    return canvas.toDataURL('image/png');
-  };
+    const fetchInitialData = async () => {
+      try {
+        // 1. Busca os dados de resumo do documento e do signatário.
+        const summaryResponse = await api.get(`/sign/${token}`);
+        setSummaryData(summaryResponse.data);
+        
+        // 2. Busca a URL para download/visualização do PDF.
+        // Supondo que a API de resumo retorna o ID do documento.
+        const docId = summaryResponse.data.document.id;
+        if (!docId) {
+            throw new Error("ID do documento não encontrado nos dados de resumo.");
+        }
+        
+        const urlResponse = await api.get(`/documents/${docId}/download?variant=original`);
+        setDocumentUrl(urlResponse.data.url); // A API deve retornar um objeto { url: '...' }
+        
+        // 3. Se tudo deu certo, avança para o primeiro passo.
+        setCurrentStep(1);
 
-  const handleSaveCapture = () => {
-    let dataUrl;
-    if (activeTab === 'draw') {
-      if (signaturePad && !signaturePad.isEmpty()) {
-        dataUrl = signaturePad.toDataURL('image/png');
-      } else { return alert("Por favor, desenhe sua assinatura."); }
-    } else {
-      if (typedName) {
-        dataUrl = generateTypedSignatureImage(typedName);
-      } else { return alert("Por favor, digite seu nome."); }
-    }
-    setSignatureImage(dataUrl);
-    onSigned(dataUrl);
-    setSubStep('position');
-  };
+      } catch (err) {
+        setError(err.response?.data?.message || 'Link de assinatura inválido, expirado ou não encontrado.');
+        setCurrentStep(-1); // Define o estado de erro
+      }
+    };
 
-  const [numPages, setNumPages] = useState(null);
-  const [pageNumber, setPageNumber] = useState(1);
-  const [pdfContainerSize, setPdfContainerSize] = useState({ width: 0, height: 0 });
-  const pdfWrapperRef = useRef(null);
+    fetchInitialData();
+  }, [token]);
+  
+  // Funções de navegação para passar como props aos componentes filhos
+  const goToNextStep = () => setCurrentStep(prev => prev + 1);
+  const goToPrevStep = () => setCurrentStep(prev => prev - 1);
 
-  useEffect(() => {
-    if (pdfWrapperRef.current) {
-        setPdfContainerSize({ width: pdfWrapperRef.current.offsetWidth });
-    }
-  }, [subStep]);
-
-  const onDocumentLoadSuccess = ({ numPages }) => setNumPages(numPages);
-
-  const handleStopDrag = async (e, data) => {
-    const position = { x: data.x, y: data.y, page: pageNumber };
-    try {
-        await api.post(`/sign/${token}/position`, { position });
-        onNext();
-    } catch(error) {
-        alert("Erro ao salvar a posição da assinatura.");
-    }
-  };
-
-  if (subStep === 'capture') {
-    return (
-      <Card className="w-full bg-white shadow-lg rounded-xl border-none p-8">
-        <CardHeader className="p-0 mb-4 flex flex-row justify-between items-center">
-            <CardTitle className="text-2xl font-bold text-[#151928]">Assinatura do documento</CardTitle>
-        </CardHeader>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="draw">Desenhar</TabsTrigger>
-            <TabsTrigger value="type">Digitar</TabsTrigger>
-          </TabsList>
-          <TabsContent value="draw">
-            <canvas ref={canvasRef} className="border rounded-lg w-full h-48" />
-          </TabsContent>
-          <TabsContent value="type">
-            <Input 
-                value={typedName} 
-                onChange={(e) => setTypedName(e.target.value)}
-                placeholder="Digite seu nome aqui"
-                className="h-12 text-2xl"
-                // <<< 2. CORREÇÃO DA FONTE: Usar aspas simples
-                style={{ fontFamily: "'Dancing Script', cursive" }}
-            />
-             <div className="mt-4 p-4 border rounded-lg h-36 flex items-center justify-center" style={{ fontFamily: "'Dancing Script', cursive", fontSize: '40px' }}>
-                {typedName || 'Pré-visualização'}
+  /**
+   * Renderiza o componente correspondente ao passo atual do fluxo.
+   */
+  const renderStep = () => {
+    switch (currentStep) {
+      case 0: // Estado de Carregamento
+        return (
+            <div className="w-full max-w-2xl bg-white p-8 rounded-lg shadow-lg">
+                <Skeleton className="h-8 w-3/4 mb-6" />
+                <Skeleton className="h-4 w-1/2 mb-8" />
+                <Skeleton className="h-40 w-full" />
+                <div className="flex justify-end mt-8">
+                    <Skeleton className="h-10 w-24" />
+                </div>
             </div>
-          </TabsContent>
-        </Tabs>
-        <CardFooter className="flex justify-between items-center p-0 mt-6">
-            <Button variant="outline" onClick={onBack}>Anterior</Button>
-            <Button onClick={handleSaveCapture} className="bg-[#1c4ed8] hover:bg-[#1c4ed8]/90">Salvar e Posicionar</Button>
-        </CardFooter>
-      </Card>
-    );
-  }
+        );
+      
+      case 1: // Resumo do Documento
+        return <Step1_Summary data={summaryData} onNext={goToNextStep} />;
+      
+      case 2: // Identificação (CPF, Celular, etc.)
+        return <Step2_Identify token={token} onNext={goToNextStep} onBack={goToPrevStep} />;
+      
+      case 3: // Captura e Posicionamento da Assinatura
+        return (
+          <Step3_DrawSign 
+            token={token}
+            documentUrl={documentUrl} 
+            onNext={goToNextStep} 
+            onBack={goToPrevStep} 
+            onSigned={setSignatureImage} 
+          />
+        );
+      
+      case 4: // Verificação com OTP
+        return (
+          <Step4_VerifyOtp 
+            token={token} 
+            signatureImage={signatureImage} 
+            onNext={goToNextStep} 
+            onBack={goToPrevStep} 
+          />
+        );
+      
+      case 5: // Sucesso
+        return <Step5_Success />;
+      
+      case -1: // Estado de Erro
+        return (
+          <div className="w-full max-w-lg text-center bg-white p-10 rounded-lg shadow-lg border border-red-200">
+            <h2 className="text-2xl font-bold text-red-700 mb-4">Ocorreu um Erro</h2>
+            <p className="text-gray-600">{error}</p>
+            {/* Opcional: botão para voltar à página inicial */}
+          </div>
+        );
+        
+      default:
+        return null;
+    }
+  };
 
-  if (subStep === 'position') {
-    return (
-        <Card className="w-full bg-white shadow-lg rounded-xl border-none p-8">
-            <CardHeader className="p-0 mb-4">
-                <CardTitle className="text-2xl font-bold text-[#151928]">Posicione sua Assinatura</CardTitle>
-                <p className="text-muted-foreground mt-1">Arraste a sua assinatura para o local desejado.</p>
-            </CardHeader>
-            <CardContent ref={pdfWrapperRef} className="p-0 relative border rounded-lg overflow-auto max-h-[70vh]">
-                <Document file={documentUrl} onLoadSuccess={onDocumentLoadSuccess} className="flex justify-center">
-                    <Page pageNumber={pageNumber} width={pdfContainerSize.width ? pdfContainerSize.width * 0.95 : undefined} />
-                </Document>
-
-                {signatureImage && (
-                    <Draggable bounds="parent" onStop={handleStopDrag}>
-                        {/* <<< 3. CORREÇÃO DA IMAGEM: Usar <Image /> do Next.js >>> */}
-                        <div className="absolute top-1/2 left-1/2 cursor-move">
-                            <Image 
-                                src={signatureImage} 
-                                alt="Sua assinatura" 
-                                width={192} // 48 * 4 = 192px (max-w-48)
-                                height={70} // Altura proporcional
-                                className="pointer-events-none" // Impede que a imagem interfira no drag
-                            />
-                        </div>
-                    </Draggable>
-                )}
-            </CardContent>
-             <CardFooter className="flex justify-between items-center p-0 mt-6">
-                <Button variant="outline" onClick={() => setSubStep('capture')}>Voltar para Assinatura</Button>
-                <p className="text-sm text-gray-500">A assinatura será confirmada ao soltar.</p>
-            </CardFooter>
-        </Card>
-    );
-  }
-
-  return null;
+  return (
+    <main className="flex flex-col min-h-screen w-full items-center justify-center bg-[#f1f5f9] p-4">
+        <div className="absolute top-8 left-8">
+            <Image src="/logo.png" alt="Doculink Logo" width={140} height={32} />
+        </div>
+      <div className="w-full max-w-3xl">
+        {renderStep()}
+      </div>
+    </main>
+  );
 }
