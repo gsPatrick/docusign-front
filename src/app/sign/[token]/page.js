@@ -9,7 +9,7 @@ import api from '@/lib/api';
 
 // Importa os componentes de passo (exceto o Step3, que é dinâmico)
 import Step1_Summary from './_components/Step1_Summary';
-import Step2_Identify from './_components-Step2_Identify';
+import Step2_Identify from './_components/Step2_Identify';
 import Step4_VerifyOtp from './_components/Step4_VerifyOtp';
 import Step5_Success from './_components/Step5_Success';
 
