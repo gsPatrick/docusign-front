@@ -34,16 +34,25 @@ export default function Sidebar() {
   return (
     <aside className="hidden lg:flex flex-col w-[240px] h-screen bg-[#F7F9FC] border-r">
       
-      <div className="flex-grow flex flex-col p-4 space-y-8">
-        <div className="px-2">
+      {/* 
+        CORREÇÃO: Removemos a div intermediária desnecessária e aplicamos flex-grow e overflow-y-auto 
+        ao container de navegação para garantir que APENAS o menu role.
+        
+        Mantivemos a navegação e o logo separadas do profile footer.
+      */}
+      <div className="flex-grow flex flex-col p-4 space-y-6 overflow-y-auto">
+        {/* Logo */}
+        <div className="px-2 shrink-0">
           <Link href="/dashboard" aria-label="Voltar para o Dashboard">
             <Image src="/logo.png" alt="Logo Doculink" width={140} height={32} priority />
           </Link>
         </div>
-        <Navigation />
+        {/* Navegação */}
+        <Navigation /> {/* Navigation.js já tem 'flex-grow' e 'overflow-y-auto' em sua tag <nav> */}
       </div>
       
-      <div className="p-4 border-t">
+      {/* Footer do Perfil (Fixo no bottom) */}
+      <div className="p-4 border-t shrink-0">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button className="w-full flex items-center gap-3 text-left p-2 rounded-lg transition-colors hover:bg-gray-200/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">

@@ -1,3 +1,4 @@
+// src/app/(dashboard)/layout.js
 "use client"; // Precisa ser um Client Component para usar o usePathname
 
 import { usePathname } from 'next/navigation';
@@ -9,15 +10,14 @@ export default function DashboardLayout({ children }) {
   return (
     <div className="flex min-h-screen w-full bg-[#F8FAFC]">
       <Sidebar />
-      <main className="flex-1 flex flex-col">
-        {/*
-          --- CORREÇÃO CRUCIAL ---
-          Adicionando uma 'key' única ao container do children.
-          Quando o usuário navega de /documentos/pendentes para /documentos/todos,
-          o 'pathname' muda, forçando o React a desmontar o componente antigo
-          e montar um novo, garantindo que o estado e os useEffects rodem do zero.
-        */}
-        <div key={pathname}>
+      {/* 
+        CORREÇÃO: Adicionado 'flex-col' e 'h-screen' ao main.
+        O 'flex-1' faz o main preencher a largura restante.
+        O 'h-screen' força o main a ter a mesma altura da sidebar.
+        O 'flex-col' permite que o Header e o conteúdo de cada página se organizem em coluna.
+      */}
+      <main className="flex-1 flex flex-col h-screen"> 
+        <div key={pathname} className="flex-1 overflow-y-auto">
           {children}
         </div>
       </main>
