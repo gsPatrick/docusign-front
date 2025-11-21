@@ -21,29 +21,35 @@ const masks = {
     expiry: (v) => v.replace(/\D/g, "").replace(/(\d{2})(\d)/, "$1/$2").slice(0, 5),
     cpf: (v) => v.replace(/\D/g, "").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d)/, "$1.$2").replace(/(\d{3})(\d{1,2})/, "$1-$2").slice(0, 14),
     phone: (v) => v.replace(/\D/g, "").replace(/^(\d{2})(\d)/g, "($1) $2").replace(/(\d)(\d{4})$/, "$1-$2").slice(0, 15),
-    ccv: (v) => v.replace(/\D/g, "").slice(0, 4)
+    ccv: (v) => v.replace(/\D/g, "").slice(0, 4),
+    // --- NOVO: MÁSCARA DE CEP ---
+    cep: (v) => v.replace(/\D/g, "").replace(/^(\d{5})(\d)/, "$1-$2").slice(0, 9)
 };
 
 // --- COMPONENTE: MODAL DE CHECKOUT ---
 function CheckoutDialog({ open, onOpenChange, plan, user }) {
     const [loading, setLoading] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState("CREDIT_CARD");
-    const [pixData, setPixData] = useState(null); // { encodedImage, payload, expirationDate }
+    const [pixData, setPixData] = useState(null);
     const [copied, setCopied] = useState(false);
+    
+    // --- ATUALIZADO: Estado com CEP e Número ---
     const [formData, setFormData] = useState({
         holderName: user?.name || "",
         number: "",
         expiry: "",
         ccv: "",
         cpfCnpj: user?.cpf || "",
-        phone: user?.phoneWhatsE164 || "", 
+        phone: user?.phoneWhatsE164 || "",
+        postalCode: "", // Novo campo
+        addressNumber: "" // Novo campo
     });
 
-    // Reseta estados ao fechar/abrir
     useEffect(() => {
         if (open) {
             setPixData(null);
             setLoading(false);
+            // Resetar ou preencher dados iniciais se necessário
         }
     }, [open]);
 
@@ -57,6 +63,8 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
         if (id === 'ccv') formattedValue = masks.ccv(value);
         if (id === 'cpfCnpj') formattedValue = masks.cpf(value);
         if (id === 'phone') formattedValue = masks.phone(value);
+        // --- NOVO: Máscara de CEP ---
+        if (id === 'postalCode') formattedValue = masks.cep(value);
 
         setFormData(prev => ({ ...prev, [id]: formattedValue }));
     };
@@ -70,6 +78,13 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
             };
 
             if (paymentMethod === 'CREDIT_CARD') {
+                // Validações básicas no front antes de enviar
+                if (!formData.postalCode || formData.postalCode.length < 9) {
+                    alert("Por favor, preencha um CEP válido.");
+                    setLoading(false);
+                    return;
+                }
+
                 const [expMonth, expYear] = formData.expiry.split('/');
                 
                 payload.creditCard = {
@@ -80,12 +95,13 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
                     ccv: formData.ccv
                 };
                 
+                // --- ATUALIZADO: Payload com CEP correto ---
                 payload.creditCardHolderInfo = {
                     name: formData.holderName,
                     email: user.email,
                     cpfCnpj: formData.cpfCnpj.replace(/\D/g, ""),
-                    postalCode: "00000000", 
-                    addressNumber: "0",
+                    postalCode: formData.postalCode.replace(/\D/g, ""), // Envia apenas números
+                    addressNumber: formData.addressNumber || "0", // Envia o número ou 0
                     phone: formData.phone.replace(/\D/g, "")
                 };
             }
@@ -105,7 +121,9 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
 
         } catch (error) {
             console.error("Erro no pagamento:", error);
-            alert(error.response?.data?.message || "Erro ao processar pagamento. Verifique os dados.");
+            // Melhora a mensagem de erro para o usuário
+            const msg = error.response?.data?.message || "Erro ao processar pagamento.";
+            alert(msg);
         } finally {
             if (paymentMethod !== 'PIX') setLoading(false); 
             else if (pixData) setLoading(false); 
@@ -123,11 +141,11 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[500px]">
+            <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                     <DialogTitle>Assinar Plano {plan?.name}</DialogTitle>
                     <DialogDescription>
-                        Valor: <strong>R$ {plan?.price}</strong>/mês. Cancele quando quiser.
+                        Valor: <strong>R$ {plan?.price}</strong>/mês. Cobrança segura via Asaas.
                     </DialogDescription>
                 </DialogHeader>
 
@@ -143,6 +161,7 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
                         </TabsList>
 
                         <TabsContent value="CREDIT_CARD" className="space-y-4">
+                            {/* DADOS DO CARTÃO */}
                             <div className="grid gap-2">
                                 <Label htmlFor="holderName">Nome no Cartão</Label>
                                 <Input id="holderName" value={formData.holderName} onChange={handleInputChange} placeholder="Como está no cartão" />
@@ -162,11 +181,13 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
                                 </div>
                             </div>
                             
+                            {/* SEPARADOR VISUAL */}
                             <div className="relative my-4">
                                 <div className="absolute inset-0 flex items-center"><span className="w-full border-t" /></div>
                                 <div className="relative flex justify-center text-xs uppercase"><span className="bg-background px-2 text-muted-foreground">Dados do Titular</span></div>
                             </div>
 
+                            {/* DADOS DO TITULAR (CPF + CONTATO) */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="grid gap-2">
                                     <Label htmlFor="cpfCnpj">CPF/CNPJ</Label>
@@ -177,15 +198,27 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
                                     <Input id="phone" value={formData.phone} onChange={handleInputChange} placeholder="(11) 99999-9999" maxLength={15} />
                                 </div>
                             </div>
+
+                            {/* --- NOVO: CEP E NÚMERO --- */}
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="grid gap-2">
+                                    <Label htmlFor="postalCode">CEP</Label>
+                                    <Input id="postalCode" value={formData.postalCode} onChange={handleInputChange} placeholder="00000-000" maxLength={9} />
+                                </div>
+                                <div className="grid gap-2">
+                                    <Label htmlFor="addressNumber">Número (Endereço)</Label>
+                                    <Input id="addressNumber" value={formData.addressNumber} onChange={handleInputChange} placeholder="123" />
+                                </div>
+                            </div>
                         </TabsContent>
 
                         <TabsContent value="PIX" className="py-4 text-center text-sm text-gray-500">
-                            {/* CORREÇÃO AQUI: Aspas trocadas por &quot; */}
                             <p>Ao clicar em &quot;Pagar com PIX&quot;, um QR Code será gerado.</p>
                             <p>A liberação do plano ocorre em alguns instantes após o pagamento.</p>
                         </TabsContent>
                     </Tabs>
                 ) : (
+                    // TELA DE SUCESSO DO PIX
                     <div className="flex flex-col items-center justify-center space-y-4 py-4">
                         <div className="text-center space-y-1">
                             <h3 className="font-semibold text-lg text-green-600">QR Code Gerado!</h3>
@@ -193,7 +226,6 @@ function CheckoutDialog({ open, onOpenChange, plan, user }) {
                         </div>
                         
                         <div className="border-4 border-white shadow-lg rounded-lg overflow-hidden">
-                            {/* CORREÇÃO AQUI: Adicionado eslint-disable para o next/image */}
                             {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img 
                                 src={`data:image/png;base64,${pixData.encodedImage}`} 
